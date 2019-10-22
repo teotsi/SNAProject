@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import re
 from time import sleep
 
@@ -22,18 +23,20 @@ def check_song(title_tag):
     title_elements = re.findall('\[[^\]]*\]|\([^\)]*\)|\"[^\"]*\"|\S+', title_tag)
     title=''
     rating=0
-    for element in title_elements:
-        if '(' not in element:
-           title+=element
-        else:
-            specifications = re.findall('\(([^)]+)', element)
-            print(specifications)
-            if specifications[-1].isnumeric():
-                pass
-    if title_tag.upper() in titles:
+    specifications = re.search('\(([^)]+)', title_elements.pop()).group(1).split(',')
+    title=' '.join(title_elements).upper()
+    print("Specs: "+str(specifications)+" Title: "+title)
+    if title in titles:
+        print("duplicate rating: "+ str(titles[title]))
         return True
     else:
-        titles.append(title_tag)
+        current_rating=specifications[-1]
+        if current_rating.isnumeric():
+            print("Numeric " + str(current_rating.encode('utf-8')))
+            titles[title] = current_rating.encode('utf-8')
+        else:
+            print(current_rating)
+            titles[title] = 0
         return False
     pass
 
@@ -45,9 +48,9 @@ artist_session = requests.Session()  # starting a new session
 cookies = dict(memberSession=get_cookie())  # login cookie, allows for unlimited pings
 artist_data = artist_session.get(artist_url, cookies=cookies)  # getting HTML artist page
 artist_text = artist_data.text  # scraping text
-artist_soup = BeautifulSoup(artist_text, 'lxml')  # initialising BS4
+artist_soup = BeautifulSoup(artist_text)  # initialising BS4
 tables = artist_soup.find_all("table", class_="thist2col")  # songs are stored on a table
-titles = []
+titles = dict()
 song_table = tables[1]  # the first table is just the top songs, we want all of them
 song_list = [link['href'] for link in song_table.find_all('a') if
              not check_song(link['title'])]  # scraping all links to songs from table
