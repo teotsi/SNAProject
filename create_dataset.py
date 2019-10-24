@@ -6,10 +6,25 @@ import requests
 from bs4 import BeautifulSoup
 
 
-def flat_to_sharp(chord):
-    print("Editing flat chord " + chord)
+def is_english(s):
+    try:
+        s.encode('ascii')
+    except UnicodeEncodeError:
+        return False
+    else:
+        return True
+
+
+def is_float(value):
+    try:
+        float(value)
+        return True
+    except ValueError:
+        return False
+
+
+def flat_to_sharp(chord):  # converts flat chords to their equivalent sharp chord
     chord = flat_chords[chord[:2]].upper() + chord[2:]
-    print("New value " + chord)
     return chord
 
 
@@ -17,28 +32,6 @@ def get_cookie():
     with open('cookie.txt') as file:
         for line in file:
             return line
-
-
-def check_song(title_tag):
-    title_elements = re.findall('\[[^\]]*\]|\([^\)]*\)|\"[^\"]*\"|\S+', title_tag)
-    title=''
-    rating=0
-    specifications = re.search('\(([^)]+)', title_elements.pop()).group(1).split(',')
-    title=' '.join(title_elements).upper()
-    print("Specs: "+str(specifications)+" Title: "+title)
-    if title in titles:
-        print("duplicate rating: "+ str(titles[title]))
-        return True
-    else:
-        current_rating=specifications[-1]
-        if current_rating.isnumeric():
-            print("Numeric " + str(current_rating.encode('utf-8')))
-            titles[title] = current_rating.encode('utf-8')
-        else:
-            print(current_rating)
-            titles[title] = 0
-        return False
-    pass
 
 
 flat_chords = dict(Ab='G#', Bb='A#', Db='C#', Eb='D#', Gb='F#')  # dictionary to convert flat chords to sharp chords
@@ -52,17 +45,36 @@ artist_soup = BeautifulSoup(artist_text)  # initialising BS4
 tables = artist_soup.find_all("table", class_="thist2col")  # songs are stored on a table
 titles = dict()
 song_table = tables[1]  # the first table is just the top songs, we want all of them
-song_list = [link['href'] for link in song_table.find_all('a') if
-             not check_song(link['title'])]  # scraping all links to songs from table
-
-song_ids = [link.split("/")[2] for link in song_list]  # every song has a unique id we need
+for a_tag in song_table.find_all('a'):
+    title_tag = a_tag['title']
+    link = a_tag['href']
+    title_elements = re.findall('\[[^\]]*\]|\([^\)]*\)|\"[^\"]*\"|\S+', title_tag)  # splitting title
+    specifications = re.search('\(([^)]+)', title_elements.pop()).group(1).split(',')  # song specs from parentheses
+    title = ' '.join(title_elements).upper()  # capitalising every title
+    title = re.sub(r" ?\([^)]+\)", "", title)
+    print("Specs: " + str(specifications) + " Title: " + title)
+    current_rating = specifications[-1]
+    if is_float(current_rating):
+        current_rating = float(current_rating)
+    else:
+        current_rating = 0
+    if title in titles:
+        if titles[title]['rating'] < current_rating:
+            titles[title]['rating'] = current_rating
+            titles[title]['link'] = link
+            print("updated")
+    else:
+        titles[title] = {}
+        titles[title]['rating'] = current_rating
+        titles[title]['link'] = link
+song_ids = [titles[song]['link'].split("/")[2] for song in titles]
+print(len(song_ids))
 chords = dict()  # distinct chords will be stored here
 edges = []  # edges of the graph aka chord transitions will be stored here
 id = 0  # id variable for chords
 previous_chord = None
 counter = 1
 for song_id in song_ids:  # going through every single song
-    print(counter)
     counter += 1
     session = requests.Session()  # starting a new session
     data = session.get(base_url + song_id, cookies=cookies)  # getting song page data with a login cookie
@@ -73,6 +85,7 @@ for song_id in song_ids:  # going through every single song
         divtext = div.text
         line = divtext.split()  # splitting chords
         for chord in line:
+            chord = chord.capitalize()
             if chord in chords:
                 # TODO
                 try:
@@ -84,8 +97,9 @@ for song_id in song_ids:  # going through every single song
                     print(e)
             else:
                 try:
-                    if chord[
-                       :1].isalpha():  # checking if it is indeed a chord (website data are not normalised by default)
+                    if chord[:1].isalpha() and is_english(chord):  # checking if it is indeed a chord
+                        if '(' in chord:
+                            chord = chord.replace('(', '-').replace(')', '')
                         if '/' in chord:
                             chord = chord.replace('/', '-')
                         if '-' in chord:
@@ -98,15 +112,29 @@ for song_id in song_ids:  # going through every single song
                                 if previous_chord != chord:
                                     edges.append(
                                         [chords[previous_chord], chords[clean_chord], 'Directed'])  # appending new edge
+                                    previous_chord = clean_chord
+
                             continue
                         if 'b' in chord:  # converting flat chord to sharp chord
                             chord = flat_to_sharp(chord)
-                        chords[chord] = id
-                        id += 1
+                        if chord not in chords:
+                            chords[chord] = id
+                            id += 1
                         if previous_chord is not None:  # useful when examining first chord
                             edges.append([chords[previous_chord], chords[chord], 'Directed'])
                         previous_chord = chord
                 except Exception as e:
                     print(e)
-    sleep(5)
-    print(sorted(chords.keys()))
+    sleep(0.5)
+    print(chords)
+nodes_csv_columns = 'id, label'
+edges_csv_columns = 'source, target, type'
+with open('nodes.csv', 'w') as csvfile:
+    csvfile.write(nodes_csv_columns + '\n')
+    for chord in chords:
+        csvfile.write(str(chords[chord]) + "," + chord + '\n')
+with open('edges.csv', 'w') as csvfile:
+    csvfile.write(edges_csv_columns)
+    for edge in edges:
+        csvfile.write('\n')
+        csvfile.write(str(edge[0]) + ',' + str(edge[1]) + ',' + str(edge[2]))
